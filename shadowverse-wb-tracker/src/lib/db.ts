@@ -5,7 +5,8 @@ import type {
 	Review,
 	CreateRecordPayload,
 	CreateReviewPayload,
-	UpdateReviewPayload
+	UpdateReviewPayload,
+	UpdateRecordPayload
 } from './types';
 
 const DB_PATH = 'sqlite:shadowverse-wb.db';
@@ -41,6 +42,11 @@ export async function createDeck(hash: string, name: string): Promise<void> {
 		name,
 		classId
 	]);
+}
+
+export async function updateDeck(hash: string, name: string): Promise<void> {
+	const db = await getDb();
+	await db.execute('UPDATE decks SET name=$1 WHERE hash=$2', [name, hash]);
 }
 
 export async function deleteDeck(hash: string): Promise<void> {
@@ -83,6 +89,22 @@ export async function createRecord(payload: CreateRecordPayload): Promise<number
 		]
 	);
 	return result.lastInsertId ?? 0;
+}
+
+export async function updateRecord(id: number, payload: UpdateRecordPayload): Promise<void> {
+	const db = await getDb();
+	await db.execute(
+		`UPDATE records SET deck_hash=$1, opponent_class_id=$2, is_first=$3, result=$4, rating_diff=$5, note=$6 WHERE id=$7`,
+		[
+			payload.deck_hash,
+			payload.opponent_class_id,
+			payload.is_first ? 1 : 0,
+			payload.result,
+			payload.rating_diff,
+			payload.note,
+			id
+		]
+	);
 }
 
 export async function deleteRecord(id: number): Promise<void> {
@@ -135,6 +157,21 @@ export async function updateReview(id: number, payload: UpdateReviewPayload): Pr
 export async function deleteReview(id: number): Promise<void> {
 	const db = await getDb();
 	await db.execute('DELETE FROM reviews WHERE id = $1', [id]);
+}
+
+// ---------- シーズンリセット ----------
+
+export async function deleteAllRecords(): Promise<void> {
+	const db = await getDb();
+	await db.execute('DELETE FROM reviews');
+	await db.execute('DELETE FROM records');
+}
+
+export async function deleteAllData(): Promise<void> {
+	const db = await getDb();
+	await db.execute('DELETE FROM reviews');
+	await db.execute('DELETE FROM records');
+	await db.execute('DELETE FROM decks');
 }
 
 // ---------- ダッシュボード ----------

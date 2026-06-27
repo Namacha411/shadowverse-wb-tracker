@@ -53,6 +53,15 @@ export type UpdateReviewPayload = {
 	note: string | null;
 };
 
+export type UpdateRecordPayload = {
+	deck_hash: string;
+	opponent_class_id: number | null;
+	is_first: boolean;
+	result: 'win' | 'lose';
+	rating_diff: number | null;
+	note: string | null;
+};
+
 export const CLASS_NAMES: Record<number, string> = {
 	1: 'エルフ',
 	2: 'ロイヤル',

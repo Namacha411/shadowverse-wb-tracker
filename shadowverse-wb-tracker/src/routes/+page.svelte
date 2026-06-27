@@ -1,15 +1,17 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import {
 		getDecks,
 		getWinRate,
 		getRecentRecords,
 		getDeckWinRates,
 		getClassWinRates,
-		getFormatWinRates
+		getFormatWinRates,
+		createRecord
 	} from '$lib/db';
 	import type { Deck, GameRecord } from '$lib/types';
-	import { CLASS_NAMES, FORMAT_NAMES } from '$lib/types';
+	import { CLASS_NAMES, CLASS_IDS, FORMAT_NAMES } from '$lib/types';
 
 	let totalWin = $state(0);
 	let totalCount = $state(0);
@@ -21,7 +23,18 @@
 
 	const deckMap = $derived(Object.fromEntries(decks.map((d) => [d.hash, d])));
 
-	onMount(async () => {
+	// --- クイック追加フォーム ---
+	let showAddForm = $state(false);
+	let formDeckHash = $state('');
+	let formOpponentClassId = $state<number | null>(null);
+	let formIsFirst = $state(true);
+	let formResult = $state<'win' | 'lose'>('win');
+	let formRatingDiff = $state('');
+	let formNote = $state('');
+	let formSubmitting = $state(false);
+	let formError = $state('');
+
+	async function loadDashboard() {
 		const [rate, recent, rawRates, rawDecks, rawClassRates, rawFormatRates] = await Promise.all([
 			getWinRate(),
 			getRecentRecords(5),
@@ -42,7 +55,52 @@
 
 		classRates = rawClassRates;
 		formatRates = rawFormatRates;
-	});
+	}
+
+	onMount(loadDashboard);
+
+	function toggleAddForm() {
+		if (decks.length === 0) {
+			goto('/decks/new');
+			return;
+		}
+		showAddForm = !showAddForm;
+		if (showAddForm) {
+			formDeckHash = decks[0].hash;
+			formOpponentClassId = null;
+			formIsFirst = true;
+			formResult = 'win';
+			formRatingDiff = '';
+			formNote = '';
+			formError = '';
+		}
+	}
+
+	async function handleAddRecord(e: Event) {
+		e.preventDefault();
+		formError = '';
+		if (!formDeckHash) {
+			formError = 'デッキを選択してください。';
+			return;
+		}
+		formSubmitting = true;
+		try {
+			await createRecord({
+				deck_hash: formDeckHash,
+				opponent_class_id: formOpponentClassId,
+				is_first: formIsFirst,
+				result: formResult,
+				rating_diff: formRatingDiff !== '' ? parseInt(formRatingDiff, 10) : null,
+				note: formNote.trim() || null
+			});
+			showAddForm = false;
+			await loadDashboard();
+		} catch (err: unknown) {
+			formError = err instanceof Error ? err.message : String(err);
+		} finally {
+			formSubmitting = false;
+		}
+	}
 
 	function winRateText(win: number, total: number): string {
 		if (total === 0) return '- %';
@@ -55,7 +113,93 @@
 	}
 </script>
 
-<h1>ダッシュボード</h1>
+<div class="page-header">
+	<h1>ダッシュボード</h1>
+	<button class="btn-add" onclick={toggleAddForm}>
+		{showAddForm ? '✕ 閉じる' : '＋ 対戦記録を追加'}
+	</button>
+</div>
+
+{#if showAddForm}
+	<div class="add-form-card">
+		<h2 class="form-title">対戦記録 新規追加</h2>
+		<form onsubmit={handleAddRecord}>
+			<div class="form-row">
+				<div class="field">
+					<label for="f-deck">使用デッキ</label>
+					<select id="f-deck" bind:value={formDeckHash}>
+						{#each decks as d}
+							<option value={d.hash}>{d.name} ({CLASS_NAMES[d.class_id] ?? '?'})</option>
+						{/each}
+					</select>
+				</div>
+
+				<div class="field">
+					<div class="field-label">先後</div>
+					<div class="radio-group">
+						<label class="radio">
+							<input type="radio" bind:group={formIsFirst} value={true} />
+							先手
+						</label>
+						<label class="radio">
+							<input type="radio" bind:group={formIsFirst} value={false} />
+							後手
+						</label>
+					</div>
+				</div>
+
+				<div class="field">
+					<div class="field-label">結果</div>
+					<div class="radio-group">
+						<label class="radio win">
+							<input type="radio" bind:group={formResult} value="win" />
+							勝ち
+						</label>
+						<label class="radio lose">
+							<input type="radio" bind:group={formResult} value="lose" />
+							負け
+						</label>
+					</div>
+				</div>
+			</div>
+
+			<div class="form-row">
+				<div class="field">
+					<label for="f-opp">相手クラス（任意）</label>
+					<select id="f-opp" bind:value={formOpponentClassId}>
+						<option value={null}>未記録</option>
+						{#each CLASS_IDS as id}
+							<option value={id}>{CLASS_NAMES[id]}</option>
+						{/each}
+					</select>
+				</div>
+
+				<div class="field">
+					<label for="f-rating">レート増減（任意）</label>
+					<input id="f-rating" type="number" bind:value={formRatingDiff} placeholder="例: 20 や -15" />
+				</div>
+
+				<div class="field field-note">
+					<label for="f-note">メモ（任意）</label>
+					<input id="f-note" type="text" bind:value={formNote} placeholder="勝敗の要因など" />
+				</div>
+			</div>
+
+			{#if formError}
+				<p class="form-error">{formError}</p>
+			{/if}
+
+			<div class="form-actions">
+				<button type="submit" class="btn-primary" disabled={formSubmitting}>
+					{formSubmitting ? '保存中...' : '保存する'}
+				</button>
+				<button type="button" class="btn-cancel" onclick={() => (showAddForm = false)}>
+					キャンセル
+				</button>
+			</div>
+		</form>
+	</div>
+{/if}
 
 <div class="stats-row">
 	<div class="stat-card">
@@ -168,10 +312,17 @@
 </section>
 
 <style>
+	.page-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 20px;
+	}
+
 	h1 {
 		font-size: 22px;
-		margin-bottom: 20px;
 		color: #c0c0e0;
+		margin: 0;
 	}
 
 	h2 {
@@ -180,6 +331,144 @@
 		color: #9090b0;
 	}
 
+	.btn-add {
+		background: #7c83fd;
+		color: #fff;
+		border: none;
+		border-radius: 6px;
+		padding: 8px 16px;
+		font-size: 13px;
+		cursor: pointer;
+		font-family: inherit;
+	}
+
+	.btn-add:hover {
+		background: #6570e8;
+	}
+
+	/* クイック追加フォーム */
+	.add-form-card {
+		background: #1a1a2e;
+		border: 1px solid #2a2a4a;
+		border-radius: 8px;
+		padding: 20px 24px;
+		margin-bottom: 24px;
+	}
+
+	.form-title {
+		font-size: 14px;
+		color: #9090b0;
+		margin: 0 0 16px;
+	}
+
+	.form-row {
+		display: flex;
+		gap: 20px;
+		flex-wrap: wrap;
+		margin-bottom: 12px;
+	}
+
+	.field {
+		display: flex;
+		flex-direction: column;
+		min-width: 140px;
+	}
+
+	.field-note {
+		flex: 1;
+		min-width: 200px;
+	}
+
+	label,
+	.field-label {
+		font-size: 12px;
+		color: #7070a0;
+		margin-bottom: 6px;
+	}
+
+	select,
+	input[type='number'],
+	input[type='text'] {
+		background: #0f0f1e;
+		border: 1px solid #2a2a4a;
+		border-radius: 6px;
+		color: #e0e0ff;
+		padding: 8px 10px;
+		font-size: 13px;
+		outline: none;
+		font-family: inherit;
+		width: 100%;
+		box-sizing: border-box;
+	}
+
+	select:focus,
+	input:focus {
+		border-color: #7c83fd;
+	}
+
+	.radio-group {
+		display: flex;
+		gap: 16px;
+		align-items: center;
+		padding-top: 4px;
+	}
+
+	.radio {
+		display: flex;
+		align-items: center;
+		gap: 5px;
+		cursor: pointer;
+		font-size: 13px;
+		color: #c0c0e0;
+	}
+
+	.radio.win {
+		color: #4caf8a;
+	}
+
+	.radio.lose {
+		color: #e05c5c;
+	}
+
+	.form-error {
+		color: #e05c5c;
+		font-size: 12px;
+		margin: 4px 0 8px;
+	}
+
+	.form-actions {
+		display: flex;
+		gap: 12px;
+		align-items: center;
+		margin-top: 8px;
+	}
+
+	.btn-primary {
+		background: #7c83fd;
+		color: #fff;
+		border: none;
+		border-radius: 6px;
+		padding: 8px 20px;
+		font-size: 13px;
+		cursor: pointer;
+		font-family: inherit;
+	}
+
+	.btn-primary:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.btn-cancel {
+		background: none;
+		border: none;
+		color: #7070a0;
+		font-size: 13px;
+		cursor: pointer;
+		font-family: inherit;
+	}
+
+	/* 統計カード */
 	.stats-row {
 		display: flex;
 		gap: 16px;
